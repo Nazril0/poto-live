@@ -34,16 +34,22 @@
   #status { font-size: 14px; color: #9ca3af; margin-top: 10px; min-height: 20px; white-space: pre-line; }
   #status.err { color: #fca5a5; }
   #status.ok  { color: #86efac; }
-  img#preview, video#pv { width: 100%; border-radius: 12px; display: none; background: #000; }
+  canvas#preview { width: 100%; height: auto; border-radius: 12px; display: block; background: #000; }
   .row { display: flex; gap: 10px; }
   .row button { margin-top: 10px; }
   .note { font-size: 12px; color: #6b7280; line-height: 1.5; margin-top: 8px; }
+  .lbl { display: flex; justify-content: space-between; font-size: 14px; color: #d1d5db; margin: 14px 0 6px; }
+  input[type=range] { width: 100%; accent-color: #6366f1; }
+  select {
+    width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #4b5563;
+    background: #111827; color: #f9fafb; font-size: 15px;
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>📸 Live Photo Converter</h1>
-  <p class="sub">Ubah video jadi foto live (Motion Photo). Foto diambil dari frame pertama.Semua proses dilakukan di browser tidak ada yang diupload keserver</p>
+  <p class="sub">Ubah video jadi foto live (Motion Photo). Foto bisa dipilih dari frame mana saja. Semua proses dilakukan di browser, tidak ada yang diupload ke server.</p>
 
   <div class="card">
     <label class="pick" for="file"><strong id="pickText">Pilih video</strong><br>min. 3 detik, format MP4</label>
@@ -52,13 +58,28 @@
   </div>
 
   <div class="card" id="resultCard" style="display:none">
-    <img id="preview" alt="Preview foto">
-    <div class="row">
-      <button id="btnSave">💾 Simpan Live Photo</button>
-    </div>
-    <div class="row">
-      <button class="alt" id="btnShare">📤 Bagikan</button>
-      <button class="alt" id="btnPhoto">🖼️ Foto saja</button>
+    <canvas id="preview"></canvas>
+
+    <div class="lbl"><span>Frame untuk foto</span><span><span id="frameVal">0.00</span> dtk</span></div>
+    <input id="frame" type="range" min="0" max="1" step="0.05" value="0">
+
+    <div class="lbl"><span>Resolusi</span></div>
+    <select id="res"></select>
+    <div class="note" id="resNote"></div>
+
+    <button id="btnBuild">⚙️ Buat Live Photo</button>
+
+    <div id="outputs" style="display:none">
+      <div class="row">
+        <button id="btnSave">💾 Simpan Live Photo</button>
+      </div>
+      <div class="row">
+        <button class="alt" id="btnShare">📤 Bagikan</button>
+        <button class="alt" id="btnPhoto">🖼️ Foto saja</button>
+      </div>
+      <div class="row">
+        <button class="alt" id="btnVideo">🎬 Video saja (.mp4)</button>
+      </div>
     </div>
     <div class="note">Bisa dikirim di wa kalo support :).</div>
   </div>
@@ -69,12 +90,14 @@ const MIN_SEC = 3;
 
 const $ = (id) => document.getElementById(id);
 const fileEl = $("file"), statusEl = $("status");
-let result = null; // { livePhoto: Blob, photo: Blob, name: string }
+let src = null;     // { file, url, video, dur, vw, vh }
+let result = null;  // { livePhoto: Blob, photo: Blob, name: string }
 
 function setStatus(msg, cls = "") { statusEl.textContent = msg; statusEl.className = cls; }
+const even = (n) => Math.max(2, Math.round(n / 2) * 2);
 
 // ── XMP Motion Photo (Container + legacy MicroVideo) ─────────────────────────
-function buildXmp(videoLen) {
+function buildXmp(videoLen, tsUs = 0) {
   const xml =
 `<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="lp-app">
@@ -85,11 +108,11 @@ function buildXmp(videoLen) {
       xmlns:Item="http://ns.google.com/photos/1.0/container/item/"
       GCamera:MotionPhoto="1"
       GCamera:MotionPhotoVersion="1"
-      GCamera:MotionPhotoPresentationTimestampUs="0"
+      GCamera:MotionPhotoPresentationTimestampUs="${tsUs}"
       GCamera:MicroVideo="1"
       GCamera:MicroVideoVersion="1"
       GCamera:MicroVideoOffset="${videoLen}"
-      GCamera:MicroVideoPresentationTimestampUs="0">
+      GCamera:MicroVideoPresentationTimestampUs="${tsUs}">
       <Container:Directory>
         <rdf:Seq>
           <rdf:li rdf:parseType="Resource">
@@ -116,18 +139,18 @@ function buildXmp(videoLen) {
   return out;
 }
 
-function makeMotionPhoto(jpg, mp4) {
+function makeMotionPhoto(jpg, mp4, tsUs = 0) {
   if (jpg[0] !== 0xff || jpg[1] !== 0xd8) throw new Error("Bukan JPEG valid");
   let pos = 2;
   while (jpg[pos] === 0xff && jpg[pos + 1] === 0xe0) {   // lewati APP0/JFIF
     pos += 2 + ((jpg[pos + 2] << 8) | jpg[pos + 3]);
   }
-  return new Blob([jpg.subarray(0, pos), buildXmp(mp4.length), jpg.subarray(pos), mp4],
+  return new Blob([jpg.subarray(0, pos), buildXmp(mp4.length, tsUs), jpg.subarray(pos), mp4],
                   { type: "image/jpeg" });
 }
 
-// ── Ambil frame pertama ──────────────────────────────────────────────────────
-function firstFrame(file) {
+// ── Video helpers ────────────────────────────────────────────────────────────
+function loadVideo(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const v = document.createElement("video");
@@ -135,56 +158,206 @@ function firstFrame(file) {
 
     const fail = (m) => { URL.revokeObjectURL(url); reject(new Error(m)); };
     v.onerror = () => fail("Video tidak bisa dibaca. Coba video MP4 (H.264).");
-
-    v.onloadedmetadata = () => {
+    v.onloadeddata = () => {
       const dur = v.duration;
       if (!isFinite(dur)) return fail("Durasi video tidak terbaca.");
       if (dur < MIN_SEC) return fail(`Durasi video ${dur.toFixed(1)} detik.\nMinimal ${MIN_SEC} detik.`);
-
-      const draw = () => {
-        const c = document.createElement("canvas");
-        c.width = v.videoWidth; c.height = v.videoHeight;
-        c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
-        c.toBlob((blob) => {
-          URL.revokeObjectURL(url);
-          blob ? resolve({ blob, dur }) : reject(new Error("Gagal membuat foto."));
-        }, "image/jpeg", 0.95);
-      };
-
-      v.onseeked = () => setTimeout(draw, 60);
-      v.currentTime = 0.001;
+      resolve({ file, url, video: v, dur, vw: v.videoWidth, vh: v.videoHeight });
     };
   });
+}
+
+// Loncat ke waktu t lalu tunggu frame benar-benar tampil
+function seekTo(v, t) {
+  return new Promise((resolve) => {
+    const finish = () => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 40)));
+    if (Math.abs(v.currentTime - t) < 0.001 && v.readyState >= 2) return finish();
+    v.addEventListener("seeked", finish, { once: true });
+    setTimeout(resolve, 3000); // jaga-jaga
+    v.currentTime = t;
+  });
+}
+
+function drawFrame(canvas, v, w, h) {
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(v, 0, 0, w, h);
+}
+
+// ── Resolusi ─────────────────────────────────────────────────────────────────
+function fillRes() {
+  const short = Math.min(src.vw, src.vh);
+  const sel = $("res");
+  sel.innerHTML = "";
+  sel.add(new Option(`Asli (${src.vw}×${src.vh})`, "0"));
+  [1080, 720, 480].filter((r) => r < short).forEach((r) => {
+    const k = r / short;
+    sel.add(new Option(`${r}p (${even(src.vw * k)}×${even(src.vh * k)})`, String(r)));
+  });
+  sel.value = "0";
+  updateResNote();
+}
+
+function target() {
+  const short = Number($("res").value);
+  if (!short) return { w: src.vw, h: src.vh, scaled: false };
+  const k = short / Math.min(src.vw, src.vh);
+  return { w: even(src.vw * k), h: even(src.vh * k), scaled: true };
+}
+
+function pickMime() {
+  if (typeof MediaRecorder === "undefined") return null;
+  return ["video/mp4;codecs=avc1.640028", "video/mp4;codecs=avc1.42E01E", "video/mp4;codecs=avc1", "video/mp4"]
+    .find((t) => MediaRecorder.isTypeSupported(t)) || null;
+}
+
+function updateResNote() {
+  const note = $("resNote");
+  if (!Number($("res").value)) {
+    note.textContent = "Video dipakai apa adanya, kualitas video sama persis dengan file aslinya.";
+  } else if (pickMime()) {
+    note.textContent = "Video di-encode ulang ke resolusi ini. Prosesnya selama durasi video, hasilnya tanpa suara.";
+  } else {
+    note.textContent = "Browser ini tidak bisa encode MP4: hanya foto yang diperkecil, video tetap asli.";
+  }
+}
+
+function invalidate() { result = null; $("outputs").style.display = "none"; }
+
+// ── Preview frame ────────────────────────────────────────────────────────────
+let seekToken = 0;
+async function updatePreview() {
+  if (!src) return;
+  const t = Number($("frame").value);
+  $("frameVal").textContent = t.toFixed(2);
+  const tok = ++seekToken;
+  await seekTo(src.video, t);
+  if (tok !== seekToken) return;
+  const k = Math.min(1, 960 / Math.max(src.vw, src.vh));
+  drawFrame($("preview"), src.video, Math.round(src.vw * k), Math.round(src.vh * k));
+}
+
+$("frame").addEventListener("input", () => { invalidate(); updatePreview(); });
+$("res").addEventListener("change", () => { invalidate(); updateResNote(); });
+
+// ── Encode ulang video ke resolusi target (real-time via MediaRecorder) ─────
+async function encodeVideo(mime, w, h, onProgress) {
+  const v = document.createElement("video");
+  v.muted = true; v.playsInline = true; v.src = src.url;
+  await new Promise((res, rej) => {
+    v.onloadeddata = res;
+    v.onerror = () => rej(new Error("Gagal membuka video untuk encode."));
+  });
+
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  const fps = 30;
+  const stream = c.captureStream(fps);
+  const rec = new MediaRecorder(stream, {
+    mimeType: mime,
+    videoBitsPerSecond: Math.round(Math.min(20e6, Math.max(3e6, w * h * fps * 0.14)))
+  });
+  const chunks = [];
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  const stopped = new Promise((res) => { rec.onstop = res; });
+  const ended = new Promise((res) => { v.onended = res; });
+
+  let raf;
+  const tick = () => {
+    ctx.drawImage(v, 0, 0, w, h);
+    onProgress(v.currentTime / v.duration);
+    raf = requestAnimationFrame(tick);
+  };
+
+  v.currentTime = 0;
+  await v.play();
+  rec.start();
+  tick();
+  await ended;
+  ctx.drawImage(v, 0, 0, w, h);
+  await new Promise((r) => setTimeout(r, 150));
+  cancelAnimationFrame(raf);
+  rec.stop();
+  await stopped;
+  return new Uint8Array(await new Blob(chunks, { type: mime }).arrayBuffer());
 }
 
 // ── Proses ───────────────────────────────────────────────────────────────────
 fileEl.addEventListener("change", async () => {
   const file = fileEl.files[0];
   if (!file) return;
+  if (src) URL.revokeObjectURL(src.url);
+  src = null; invalidate();
   $("resultCard").style.display = "none";
-  result = null;
   $("pickText").textContent = file.name;
-  setStatus("⏳ Memproses...");
+  setStatus("⏳ Membaca video...");
 
   try {
-    const { blob, dur } = await firstFrame(file);
-    const jpg = new Uint8Array(await blob.arrayBuffer());
-    const mp4 = new Uint8Array(await file.arrayBuffer());
-    const live = makeMotionPhoto(jpg, mp4);
-    const base = file.name.replace(/\.[^.]+$/, "") || "video";
-
-    result = { livePhoto: live, photo: blob, name: base };
-    $("preview").src = URL.createObjectURL(blob);
-    $("preview").style.display = "block";
+    src = await loadVideo(file);
+    $("frame").max = String(src.dur);
+    $("frame").value = "0";
+    fillRes();
     $("resultCard").style.display = "block";
-
+    await updatePreview();
     const warn = /mp4/i.test(file.type) ? "" :
       "\n⚠️ Video bukan MP4, hasil mungkin tidak bisa diputar sebagai live.";
-    setStatus(`✅ Selesai (${dur.toFixed(1)} detik)${warn}`, "ok");
+    setStatus(`✅ Video terbaca: ${src.vw}×${src.vh}, ${src.dur.toFixed(1)} detik\nPilih frame dan resolusi, lalu tekan Buat.${warn}`, "ok");
   } catch (e) {
     setStatus("❌ " + e.message, "err");
   }
 });
+
+$("btnBuild").onclick = async () => {
+  if (!src) return;
+  const btn = $("btnBuild");
+  btn.disabled = true; invalidate();
+  try {
+    const t = Number($("frame").value);
+    const { w, h, scaled } = target();
+
+    setStatus("⏳ Membuat foto...");
+    await seekTo(src.video, t);
+    const c = document.createElement("canvas");
+    drawFrame(c, src.video, w, h);
+    const photo = await new Promise((res, rej) =>
+      c.toBlob((b) => (b ? res(b) : rej(new Error("Gagal membuat foto."))), "image/jpeg", 0.98));
+
+    let mp4, note = "";
+    const mime = scaled ? pickMime() : null;
+    if (scaled && mime) {
+      const msg = (p) => `⏳ Encode video ${Math.round(p * 100)}%\nJangan pindah tab atau kunci layar.`;
+      setStatus(msg(0));
+      mp4 = await encodeVideo(mime, w, h, (p) => setStatus(msg(p)));
+    } else {
+      mp4 = new Uint8Array(await src.file.arrayBuffer());
+      if (scaled) note = "\n⚠️ Browser tidak bisa encode MP4, video tetap ukuran asli.";
+    }
+
+    const jpg = new Uint8Array(await photo.arrayBuffer());
+    const live = makeMotionPhoto(jpg, mp4, Math.round(t * 1e6));
+    const code = String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
+    result = {
+      livePhoto: live, photo,
+      video: new Blob([mp4], { type: "video/mp4" }),
+      name: `potolive${code}`
+    };
+
+    $("outputs").style.display = "block";
+    const warn = /mp4/i.test(src.file.type) ? "" :
+      "\n⚠️ Video bukan MP4, hasil mungkin tidak bisa diputar sebagai live.";
+    setStatus(`✅ Selesai: foto ${w}×${h}, ${(live.size / 1048576).toFixed(1)} MB${note}${warn}`, "ok");
+  } catch (e) {
+    setStatus("❌ " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 function download(blob, filename) {
   const a = document.createElement("a");
@@ -194,11 +367,12 @@ function download(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
 
-$("btnSave").onclick  = () => result && download(result.livePhoto, `${result.name}_livephoto.jpg`);
-$("btnPhoto").onclick = () => result && download(result.photo, `${result.name}_photo.jpg`);
+$("btnSave").onclick  = () => result && download(result.livePhoto, `${result.name}.jpg`);
+$("btnPhoto").onclick = () => result && download(result.photo, `${result.name}_foto.jpg`);
+$("btnVideo").onclick = () => result && download(result.video, `${result.name}.mp4`);
 $("btnShare").onclick = async () => {
   if (!result) return;
-  const f = new File([result.livePhoto], `${result.name}_livephoto.jpg`, { type: "image/jpeg" });
+  const f = new File([result.livePhoto], `${result.name}.jpg`, { type: "image/jpeg" });
   if (navigator.canShare && navigator.canShare({ files: [f] })) {
     try { await navigator.share({ files: [f] }); } catch {}
   } else {
