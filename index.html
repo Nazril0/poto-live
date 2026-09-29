@@ -3,55 +3,161 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#111827">
+<meta name="theme-color" content="#E4E7FF">
 <title>Live Photo Converter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --paper: #E4E7FF;
+    --paper-deep: #CDD2F7;
+    --ink: #14173A;
+    --mute: #5A5F8F;
+    --blue: #3A46FF;
+    --sun: #FFD23F;
+    --white: #FFFFFF;
+    --ok: #0B7A4B;
+    --err: #C21F3A;
+    --display: "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
+    --body: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { scroll-behavior: smooth; }
   body {
-    margin: 0; min-height: 100vh; padding: 20px 16px 40px;
-    background: #111827; color: #f9fafb;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0; min-height: 100vh;
+    padding: 28px 16px calc(48px + env(safe-area-inset-bottom));
+    background: var(--paper); color: var(--ink);
+    font-family: var(--body); font-size: 15px; line-height: 1.5;
     display: flex; flex-direction: column; align-items: center;
+    overflow-x: hidden;
   }
-  .wrap { width: 100%; max-width: 440px; }
-  h1 { font-size: 22px; margin: 8px 0 4px; }
-  p.sub { margin: 0 0 20px; color: #9ca3af; font-size: 14px; line-height: 1.5; }
-  .card { background: #1f2937; border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  /* satu bentuk besar di belakang, sebagai penanda "live" */
+  body::before {
+    content: ""; position: fixed; z-index: -1;
+    width: 520px; height: 520px; right: -260px; top: -200px; border-radius: 50%;
+    background: radial-gradient(circle, var(--sun) 0 28%, transparent 28.5% 40%, rgba(255,210,63,.55) 40.5% 41.5%, transparent 42% 54%, rgba(255,210,63,.35) 54.5% 55.5%, transparent 56%);
+  }
+  .wrap { width: 100%; max-width: 460px; }
+
+  /* ── Kepala ── */
+  header { margin: 6px 2px 26px; }
+  h1 {
+    font-family: var(--display); font-weight: 800;
+    font-size: clamp(38px, 11vw, 50px); line-height: .98; letter-spacing: -.035em;
+    margin: 0 0 14px;
+  }
+  p.sub { margin: 0; color: var(--mute); max-width: 36ch; }
+
+  /* ── Pilih video ── */
   .pick {
-    display: block; text-align: center; padding: 22px 12px;
-    border: 2px dashed #4b5563; border-radius: 14px; cursor: pointer;
-    color: #d1d5db; font-size: 15px;
+    display: flex; align-items: center; gap: 14px;
+    padding: 16px; cursor: pointer;
+    background: var(--white); border: 2px solid var(--ink); border-radius: 22px;
+    transition: transform .15s ease, box-shadow .15s ease;
+    box-shadow: 4px 4px 0 var(--ink);
   }
-  .pick strong { color: #fff; }
-  input[type=file] { display: none; }
-  button {
-    width: 100%; padding: 14px; border: 0; border-radius: 12px;
-    font-size: 16px; font-weight: 600; cursor: pointer;
-    background: #6366f1; color: #fff; margin-top: 10px;
+  .pick:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
+  .pick .ico {
+    flex: none; width: 52px; height: 52px; border-radius: 16px;
+    background: var(--blue); display: grid; place-items: center;
   }
-  button.alt { background: #374151; }
-  button:disabled { opacity: .45; }
-  #status { font-size: 14px; color: #9ca3af; margin-top: 10px; min-height: 20px; white-space: pre-line; }
-  #status.err { color: #fca5a5; }
-  #status.ok  { color: #86efac; }
-  canvas#preview { width: 100%; height: auto; border-radius: 12px; display: block; background: #000; }
-  .row { display: flex; gap: 10px; }
-  .row button { margin-top: 10px; }
-  .note { font-size: 12px; color: #6b7280; line-height: 1.5; margin-top: 8px; }
-  .lbl { display: flex; justify-content: space-between; font-size: 14px; color: #d1d5db; margin: 14px 0 6px; }
-  input[type=range] { width: 100%; accent-color: #6366f1; }
-  select {
-    width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #4b5563;
-    background: #111827; color: #f9fafb; font-size: 15px;
+  .pick .ico svg { width: 26px; height: 26px; }
+  .pick .txt { min-width: 0; }
+  .pick strong {
+    display: block; font-family: var(--display); font-size: 18px; font-weight: 700;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .pick small { color: var(--mute); font-size: 13px; }
+  input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  input[type=file]:focus-visible + .pick, .pick:focus-within { outline: 3px solid var(--blue); outline-offset: 3px; }
+
+  #status {
+    font-size: 14px; color: var(--mute); margin: 14px 4px 0;
+    min-height: 20px; white-space: pre-line;
+  }
+  #status.err { color: var(--err); font-weight: 600; }
+  #status.ok  { color: var(--ok); font-weight: 600; }
+
+  /* ── Hasil ── */
+  #resultCard { margin-top: 26px; }
+
+  /* preview jadi foto instan */
+  .polaroid {
+    margin: 0 0 6px; padding: 12px 12px 0; background: var(--white);
+    border: 2px solid var(--ink); border-radius: 8px 8px 22px 22px;
+    box-shadow: 6px 6px 0 var(--ink);
+    transform: rotate(-1.2deg);
+    position: relative;
+  }
+  .polaroid canvas#preview {
+    width: 100%; height: auto; display: block; background: var(--ink);
+    border-radius: 3px; max-height: 60vh; object-fit: contain;
+  }
+  .polaroid figcaption {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 4px 14px; font-family: var(--display); font-weight: 700; font-size: 17px;
+  }
+  .polaroid figcaption span:last-child { color: var(--mute); font-family: var(--body); font-weight: 500; font-size: 14px; }
+  .live-badge {
+    position: absolute; top: 22px; left: 22px; z-index: 1;
+    display: flex; align-items: center; gap: 7px;
+    background: var(--sun); color: var(--ink);
+    border: 2px solid var(--ink); border-radius: 999px; padding: 3px 11px 3px 8px;
+    font-family: var(--display); font-weight: 800; font-size: 13px; letter-spacing: .02em;
+  }
+  .live-badge svg { width: 16px; height: 16px; }
+
+  /* panel pengaturan: satu lembar, bukan tumpukan kartu */
+  .panel {
+    margin-top: 30px; background: var(--white);
+    border: 2px solid var(--ink); border-radius: 26px; padding: 6px 18px 20px;
+  }
+  .field { padding: 16px 0; border-bottom: 2px dashed var(--paper-deep); }
+  .field:last-of-type { border-bottom: 0; }
+  .lbl {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--display); font-weight: 700; font-size: 16px; margin: 0 0 10px;
+  }
+  .lbl .val { font-family: var(--body); font-weight: 600; font-size: 14px; color: var(--blue); }
+  .lbl .val span { font-variant-numeric: tabular-nums; }
+  .ends {
+    display: flex; justify-content: space-between; margin-top: 2px;
+    font-size: 13px; color: var(--mute); font-variant-numeric: tabular-nums;
+  }
+  .note { font-size: 13px; color: var(--mute); line-height: 1.5; margin-top: 10px; }
+
+  /* slider frame */
+  input[type=range] { width: 100%; }
+  #frame {
+    -webkit-appearance: none; appearance: none; height: 36px; background: transparent; margin: 0;
+  }
+  #frame::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: var(--paper-deep); }
+  #frame::-moz-range-track { height: 8px; border-radius: 4px; background: var(--paper-deep); }
+  #frame::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 28px; height: 28px; margin-top: -10px;
+    border-radius: 50%; background: var(--sun); border: 2px solid var(--ink); cursor: grab;
+  }
+  #frame::-moz-range-thumb {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--sun); border: 2px solid var(--ink); cursor: grab;
   }
 
-  /* ── Slider potong: 1 track, 2 gagang ── */
-  .dual { position: relative; height: 36px; margin-top: 2px; }
-  .dual .track, .dual .fill {
-    position: absolute; top: 50%; height: 6px; margin-top: -3px; border-radius: 3px;
+  select {
+    width: 100%; padding: 13px 40px 13px 14px; border-radius: 14px;
+    border: 2px solid var(--ink); background: var(--paper);
+    color: var(--ink); font: 500 15px var(--body);
+    -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1l6 6 6-6' fill='none' stroke='%2314173A' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 16px center;
   }
-  .dual .track { left: 0; right: 0; background: #374151; }
-  .dual .fill  { background: #6366f1; left: 0; width: 100%; }
+
+  /* slider potong: 1 track, 2 gagang */
+  .dual { position: relative; height: 36px; }
+  .dual .track, .dual .fill {
+    position: absolute; top: 50%; height: 8px; margin-top: -4px; border-radius: 4px;
+  }
+  .dual .track { left: 0; right: 0; background: var(--paper-deep); }
+  .dual .fill  { background: var(--blue); left: 0; width: 100%; }
   .dual input[type=range] {
     position: absolute; left: 0; top: 0; width: 100%; height: 36px; margin: 0;
     background: transparent; pointer-events: none;
@@ -61,60 +167,177 @@
   .dual input[type=range]::-moz-range-track { background: transparent; height: 36px; }
   .dual input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none; pointer-events: auto;
-    width: 26px; height: 26px; margin-top: 5px; border-radius: 50%;
-    background: #fff; border: 4px solid #6366f1; cursor: grab;
+    width: 16px; height: 30px; margin-top: 3px; border-radius: 6px;
+    background: var(--white); border: 2px solid var(--ink); cursor: grab;
   }
   .dual input[type=range]::-moz-range-thumb {
-    pointer-events: auto; width: 18px; height: 18px; border-radius: 50%;
-    background: #fff; border: 4px solid #6366f1; cursor: grab;
+    pointer-events: auto; width: 12px; height: 26px; border-radius: 6px;
+    background: var(--white); border: 2px solid var(--ink); cursor: grab;
+  }
+
+  /* ── Tombol ── */
+  button {
+    font: 700 16px var(--display); cursor: pointer; color: var(--ink);
+    width: 100%; padding: 15px 16px; border: 2px solid var(--ink); border-radius: 16px;
+    background: var(--white);
+    transition: transform .12s ease, box-shadow .12s ease;
+    box-shadow: 3px 3px 0 var(--ink);
+  }
+  button:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--ink); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:focus-visible, a.btn:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+  button.primary { background: var(--blue); color: var(--white); }
+  button.sun { background: var(--sun); }
+  #btnBuild { margin-top: 8px; padding: 17px 16px; font-size: 18px; }
+  .row { display: flex; gap: 12px; margin-top: 14px; }
+  #outputs { margin-top: 22px; padding-top: 22px; border-top: 2px dashed var(--paper-deep); }
+  #outputs > .row:first-child { margin-top: 0; }
+  .foot { text-align: center; font-size: 13px; color: var(--mute); margin-top: 22px; }
+
+  /* ── Dialog follow TikTok ── */
+  .veil {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    background: rgba(20, 23, 58, .55);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    animation: veilIn .3s ease both;
+  }
+  .veil[hidden] { display: none; }
+  .sheet {
+    position: relative; width: 100%; max-width: 420px; overflow: hidden;
+    background: var(--white); border: 2px solid var(--ink); border-radius: 30px;
+    padding: 26px 22px 22px; box-shadow: 6px 6px 0 var(--ink);
+    animation: sheetIn .5s cubic-bezier(.2, 1.2, .3, 1) .08s both;
+  }
+  .sheet::before {
+    content: ""; position: absolute; width: 220px; height: 220px; right: -90px; top: -100px; border-radius: 50%;
+    background: var(--sun); z-index: 0;
+  }
+  .sheet > * { position: relative; z-index: 1; }
+  .avatar {
+    width: 64px; height: 64px; border-radius: 20px; background: var(--ink);
+    border: 2px solid var(--ink); display: grid; place-items: center;
+    box-shadow: -3px -3px 0 #25F4EE, 3px 3px 0 #FE2C55;
+    transform: rotate(-6deg); margin-bottom: 22px;
+  }
+  .avatar svg { width: 32px; height: 32px; }
+  .sheet h2 {
+    font-family: var(--display); font-weight: 800; font-size: 28px; line-height: 1.04;
+    letter-spacing: -.03em; margin: 0 0 10px;
+  }
+  .sheet p { margin: 0; color: var(--mute); }
+  .handle {
+    display: inline-block; margin: 16px 0 20px; padding: 7px 14px;
+    background: var(--paper); border: 2px solid var(--ink); border-radius: 999px;
+    font-family: var(--display); font-weight: 700; font-size: 17px; color: var(--ink);
+  }
+  .sheet .actions { display: grid; gap: 12px; }
+  a.btn {
+    display: block; text-align: center; text-decoration: none;
+    font: 700 17px var(--display); color: var(--white);
+    padding: 16px; border: 2px solid var(--ink); border-radius: 16px;
+    background: var(--blue); box-shadow: 3px 3px 0 var(--ink);
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  a.btn:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--ink); }
+  .sheet .ghost {
+    box-shadow: none; border-color: transparent; background: transparent;
+    color: var(--mute); padding: 10px; font-weight: 600; font-size: 15px;
+  }
+  .sheet .ghost:active:not(:disabled) { transform: none; box-shadow: none; color: var(--ink); }
+
+  @keyframes veilIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes sheetIn { from { opacity: 0; transform: translateY(60px) scale(.96); } to { opacity: 1; transform: none; } }
+  @media (min-width: 560px) { .veil { align-items: center; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    html { scroll-behavior: auto; }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>📸 Live Photo Converter</h1>
-  <p class="sub">Ubah video jadi foto live (Motion Photo). Foto bisa dipilih dari frame mana saja. Semua proses dilakukan di browser, tidak ada yang diupload ke server.</p>
 
-  <div class="card">
-    <label class="pick" for="file"><strong id="pickText">Pilih video</strong><br>min. 3 detik, format MP4</label>
-    <input id="file" type="file" accept="video/*">
-    <div id="status"></div>
+<!-- Dialog ajakan follow -->
+<div class="veil" id="follow" role="dialog" aria-modal="true" aria-labelledby="fTitle" aria-describedby="fDesc">
+  <div class="sheet">
+    <div class="avatar" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="#fff"><path d="M19.6 6.7a4.6 4.6 0 0 1-3.6-4.1V2h-3.4v13.4a2.8 2.8 0 1 1-2-2.7V9.2a6.2 6.2 0 1 0 5.4 6.2V9a8 8 0 0 0 4.6 1.5V7.1a4.6 4.6 0 0 1-1-.4z"/></svg>
+    </div>
+    <h2 id="fTitle">Eits, jangan kabur dulu</h2>
+    <p id="fDesc">Tools ini gratis kok. Kasih follow TikTok admin dulu dong, biar admin makin semangat bikin yang baru.</p>
+    <span class="handle">@nazxtampan__</span>
+    <div class="actions">
+      <a class="btn" id="btnTiktok" href="https://www.tiktok.com/@nazxtampan__" target="_blank" rel="noopener">Buka TikTok</a>
+      <button class="ghost" id="btnClose" type="button">Tutup</button>
+    </div>
   </div>
+</div>
 
-  <div class="card" id="resultCard" style="display:none">
-    <canvas id="preview"></canvas>
+<div class="wrap">
+  <header>
+    <h1>Video jadi Live Photo.</h1>
+    <p class="sub">Ubah video kamu jadi foto yang bisa gerak. Diproses langsung di browser, nggak ada yang diupload ke mana-mana.</p>
+  </header>
 
-    <div class="lbl"><span>Frame untuk foto</span><span><span id="frameVal">0.00</span> dtk</span></div>
-    <input id="frame" type="range" min="0" max="1" step="0.05" value="0">
+  <input id="file" type="file" accept="video/*">
+  <label class="pick" for="file">
+    <span class="ico" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="13" height="14" rx="3"/><path d="M16 10l5-3v10l-5-3"/></svg>
+    </span>
+    <span class="txt"><strong id="pickText">Pilih video</strong><small>Min. 3 detik, MP4</small></span>
+  </label>
+  <div id="status"></div>
 
-    <div class="lbl"><span>Resolusi</span></div>
-    <select id="res"></select>
-    <div class="note" id="resNote"></div>
+  <div id="resultCard" style="display:none">
+    <figure class="polaroid">
+      <div class="live-badge">
+        <svg viewBox="0 0 16 16" fill="none" stroke="#14173A" stroke-width="1.6"><circle cx="8" cy="8" r="1.8" fill="#14173A"/><circle cx="8" cy="8" r="4.4"/><circle cx="8" cy="8" r="7" stroke-dasharray="1.6 2.2"/></svg>
+        LIVE
+      </div>
+      <canvas id="preview"></canvas>
+      <figcaption><span>Frame foto</span><span><span id="frameVal">0.00</span> dtk</span></figcaption>
+    </figure>
 
-    <div class="lbl"><span>Potong video</span><span id="durVal">0.0 dtk</span></div>
-    <div class="dual">
-      <div class="track"></div>
-      <div class="fill" id="fill"></div>
-      <input id="durA" type="range" min="0" max="1" step="any" value="0">
-      <input id="durB" type="range" min="0" max="1" step="any" value="1">
+    <div class="panel">
+      <div class="field">
+        <div class="lbl"><span>Frame untuk foto</span></div>
+        <input id="frame" type="range" min="0" max="1" step="0.05" value="0" aria-label="Frame untuk foto">
+      </div>
+
+      <div class="field">
+        <div class="lbl"><span>Resolusi</span></div>
+        <select id="res" aria-label="Resolusi"></select>
+        <div class="note" id="resNote"></div>
+      </div>
+
+      <div class="field">
+        <div class="lbl"><span>Potong durasi</span><span class="val" id="durVal">0.0 dtk</span></div>
+        <div class="dual">
+          <div class="track"></div>
+          <div class="fill" id="fill"></div>
+          <input id="durA" type="range" min="0" max="1" step="any" value="0" aria-label="Awal video">
+          <input id="durB" type="range" min="0" max="1" step="any" value="1" aria-label="Akhir video">
+        </div>
+        <div class="ends"><span id="durFrom">0.0</span><span id="durTo">0.0</span></div>
+      </div>
+
+      <button class="primary" id="btnBuild">Buat Live Photo</button>
+
+      <div id="outputs" style="display:none">
+        <div class="row">
+          <button class="sun" id="btnSave">Simpan Live Photo</button>
+        </div>
+        <div class="row">
+          <button id="btnShare">Bagikan</button>
+          <button id="btnPhoto">Foto saja</button>
+        </div>
+        <div class="row">
+          <button id="btnVideo">Video saja (.mp4)</button>
+        </div>
+      </div>
     </div>
-    <div class="lbl" style="margin-top:0"><span id="durFrom">0.0</span><span id="durTo">0.0</span></div>
-
-    <button id="btnBuild">⚙️ Buat Live Photo</button>
-
-    <div id="outputs" style="display:none">
-      <div class="row">
-        <button id="btnSave">💾 Simpan Live Photo</button>
-      </div>
-      <div class="row">
-        <button class="alt" id="btnShare">📤 Bagikan</button>
-        <button class="alt" id="btnPhoto">🖼️ Foto saja</button>
-      </div>
-      <div class="row">
-        <button class="alt" id="btnVideo">🎬 Video saja (.mp4)</button>
-      </div>
-    </div>
-    <div class="note">Bisa dikirim di wa kalo support :).</div>
+    <div class="foot">Bisa dikirim di WA/TT kalo support :)</div>
   </div>
 </div>
 
@@ -125,6 +348,18 @@ const $ = (id) => document.getElementById(id);
 const fileEl = $("file"), statusEl = $("status");
 let src = null;     // { file, url, video, dur, vw, vh }
 let result = null;  // { livePhoto: Blob, photo: Blob, name: string }
+
+// ── Dialog follow TikTok ─────────────────────────────────────────────────────
+(function () {
+  const dlg = $("follow");
+  const close = () => { dlg.hidden = true; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  $("btnClose").addEventListener("click", close);
+  $("btnTiktok").addEventListener("click", () => setTimeout(close, 250));
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) close(); });
+  document.addEventListener("keydown", onKey);
+  $("btnTiktok").focus();
+})();
 
 function setStatus(msg, cls = "") { statusEl.textContent = msg; statusEl.className = cls; }
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
@@ -190,11 +425,11 @@ function loadVideo(file) {
     v.muted = true; v.playsInline = true; v.preload = "auto"; v.src = url;
 
     const fail = (m) => { URL.revokeObjectURL(url); reject(new Error(m)); };
-    v.onerror = () => fail("Video tidak bisa dibaca. Coba video MP4 (H.264).");
+    v.onerror = () => fail("Videonya nggak kebaca. Coba pakai MP4 (H.264).");
     v.onloadeddata = () => {
       const dur = v.duration;
-      if (!isFinite(dur)) return fail("Durasi video tidak terbaca.");
-      if (dur < MIN_SEC) return fail(`Durasi video ${dur.toFixed(1)} detik.\nMinimal ${MIN_SEC} detik.`);
+      if (!isFinite(dur)) return fail("Durasi videonya nggak kebaca.");
+      if (dur < MIN_SEC) return fail(`Videonya cuma ${dur.toFixed(1)} detik.\nMinimal ${MIN_SEC} detik ya.`);
       resolve({ file, url, video: v, dur, vw: v.videoWidth, vh: v.videoHeight });
     };
   });
@@ -255,11 +490,11 @@ function updateResNote() {
   const note = $("resNote");
   const scaled = !!Number($("res").value);
   if (!scaled && !isTrimmed()) {
-    note.textContent = "Video dipakai apa adanya, kualitas video sama persis dengan file aslinya.";
+    note.textContent = "Video dipakai apa adanya, kualitasnya sama kayak aslinya.";
   } else if (pickMime()) {
-    note.textContent = "Resolusi/durasi diubah, jadi video di-encode ulang. Prosesnya selama durasi video. Suara ikut kalau browser mendukung.";
+    note.textContent = "Karena resolusi/durasi diubah, video di-encode ulang, jadi prosesnya selama durasi videonya. Suara ikut kalo browser support.";
   } else {
-    note.textContent = "Browser ini tidak bisa encode MP4: video tetap asli (resolusi dan durasi penuh), hanya foto yang diperkecil.";
+    note.textContent = "Browser ini nggak bisa encode MP4, jadi videonya tetap asli (resolusi dan durasi penuh). Cuma foto yang diperkecil.";
   }
 }
 
@@ -325,7 +560,7 @@ async function encodeVideo(mime, w, h, startSec, endSec, onProgress) {
   v.muted = true; v.playsInline = true; v.src = src.url;
   await new Promise((res, rej) => {
     v.onloadeddata = res;
-    v.onerror = () => rej(new Error("Gagal membuka video untuk encode."));
+    v.onerror = () => rej(new Error("Gagal buka video buat di-encode."));
   });
 
   const c = document.createElement("canvas");
@@ -392,7 +627,7 @@ fileEl.addEventListener("change", async () => {
   src = null; invalidate();
   $("resultCard").style.display = "none";
   $("pickText").textContent = file.name;
-  setStatus("⏳ Membaca video...");
+  setStatus("⏳ Lagi baca video...");
 
   try {
     src = await loadVideo(file);
@@ -407,8 +642,8 @@ fileEl.addEventListener("change", async () => {
     $("resultCard").style.display = "block";
     await updatePreview();
     const warn = /mp4/i.test(file.type) ? "" :
-      "\n⚠️ Video bukan MP4, hasil mungkin tidak bisa diputar sebagai live.";
-    setStatus(`✅ Video terbaca: ${src.vw}×${src.vh}, ${src.dur.toFixed(1)} detik\nPilih frame dan resolusi, lalu tekan Buat.${warn}`, "ok");
+      "\n⚠️ Videonya bukan MP4, bisa jadi nggak gerak pas dibuka.";
+    setStatus(`✅ Video siap: ${src.vw}×${src.vh}, ${src.dur.toFixed(1)} detik\nAtur dulu, terus tekan Buat Live Photo.${warn}`, "ok");
   } catch (e) {
     setStatus("❌ " + e.message, "err");
   }
@@ -423,24 +658,24 @@ $("btnBuild").onclick = async () => {
     const { w, h, scaled } = target();
     const a = trimStart(), b = trimEnd();
 
-    setStatus("⏳ Membuat foto...");
+    setStatus("⏳ Bikin fotonya...");
     await seekTo(src.video, t);
     const c = document.createElement("canvas");
     drawFrame(c, src.video, w, h);
     const photo = await new Promise((res, rej) =>
-      c.toBlob((bl) => (bl ? res(bl) : rej(new Error("Gagal membuat foto."))), "image/jpeg", 0.98));
+      c.toBlob((bl) => (bl ? res(bl) : rej(new Error("Gagal bikin foto."))), "image/jpeg", 0.98));
 
     let mp4, note = "";
     const trimmed = isTrimmed();
     const needEnc = scaled || trimmed;
     const mime = needEnc ? pickMime() : null;
     if (needEnc && mime) {
-      const msg = (p) => `⏳ Encode video ${Math.round(p * 100)}%\nJangan pindah tab atau kunci layar.`;
+      const msg = (p) => `⏳ Proses video ${Math.round(p * 100)}%\nJangan pindah tab atau kunci layar dulu.`;
       setStatus(msg(0));
       mp4 = await encodeVideo(mime, even(w), even(h), trimmed ? a : 0, trimmed ? b : src.dur, (p) => setStatus(msg(p)));
     } else {
       mp4 = new Uint8Array(await src.file.arrayBuffer());
-      if (needEnc) note = "\n⚠️ Browser tidak bisa encode MP4, video tetap asli (resolusi dan durasi penuh).";
+      if (needEnc) note = "\n⚠️ Browser nggak bisa encode MP4, jadi videonya tetap asli (resolusi dan durasi penuh).";
     }
 
     const jpg = new Uint8Array(await photo.arrayBuffer());
@@ -455,8 +690,9 @@ $("btnBuild").onclick = async () => {
 
     $("outputs").style.display = "block";
     const warn = /mp4/i.test(src.file.type) ? "" :
-      "\n⚠️ Video bukan MP4, hasil mungkin tidak bisa diputar sebagai live.";
-    setStatus(`✅ Selesai: foto ${w}×${h}, ${(live.size / 1048576).toFixed(1)} MB${note}${warn}`, "ok");
+      "\n⚠️ Videonya bukan MP4, bisa jadi nggak gerak pas dibuka.";
+    setStatus(`✅ Jadi! Foto ${w}×${h}, ${(live.size / 1048576).toFixed(1)} MB${note}${warn}`, "ok");
+    $("outputs").scrollIntoView({ block: "center", behavior: "smooth" });
   } catch (e) {
     setStatus("❌ " + e.message, "err");
   } finally {
@@ -481,7 +717,7 @@ $("btnShare").onclick = async () => {
   if (navigator.canShare && navigator.canShare({ files: [f] })) {
     try { await navigator.share({ files: [f] }); } catch {}
   } else {
-    setStatus("Fitur bagikan tidak didukung di sini, pakai tombol Simpan.", "err");
+    setStatus("Fitur bagikan nggak support di sini, pakai tombol Simpan aja.", "err");
   }
 };
 
