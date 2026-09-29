@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<title>Live Photo Converter</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; min-height: 100vh; padding: 20px 16px 40px;
+    background: #111827; color: #f9fafb;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .wrap { width: 100%; max-width: 440px; }
+  h1 { font-size: 22px; margin: 8px 0 4px; }
+  p.sub { margin: 0 0 20px; color: #9ca3af; font-size: 14px; line-height: 1.5; }
+  .card { background: #1f2937; border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  .pick {
+    display: block; text-align: center; padding: 22px 12px;
+    border: 2px dashed #4b5563; border-radius: 14px; cursor: pointer;
+    color: #d1d5db; font-size: 15px;
+  }
+  .pick strong { color: #fff; }
+  input[type=file] { display: none; }
+  button {
+    width: 100%; padding: 14px; border: 0; border-radius: 12px;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+    background: #6366f1; color: #fff; margin-top: 10px;
+  }
+  button.alt { background: #374151; }
+  button:disabled { opacity: .45; }
+  #status { font-size: 14px; color: #9ca3af; margin-top: 10px; min-height: 20px; white-space: pre-line; }
+  #status.err { color: #fca5a5; }
+  #status.ok  { color: #86efac; }
+  img#preview, video#pv { width: 100%; border-radius: 12px; display: none; background: #000; }
+  .row { display: flex; gap: 10px; }
+  .row button { margin-top: 10px; }
+  .note { font-size: 12px; color: #6b7280; line-height: 1.5; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📸 Live Photo Converter</h1>
+  <p class="sub">Ubah video jadi foto live (Motion Photo). Foto diambil dari frame pertama.Semua proses dilakukan di browser tidak ada yang diupload keserver</p>
+
+  <div class="card">
+    <label class="pick" for="file"><strong id="pickText">Pilih video</strong><br>min. 3 detik, format MP4</label>
+    <input id="file" type="file" accept="video/*">
+    <div id="status"></div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none">
+    <img id="preview" alt="Preview foto">
+    <div class="row">
+      <button id="btnSave">💾 Simpan Live Photo</button>
+    </div>
+    <div class="row">
+      <button class="alt" id="btnShare">📤 Bagikan</button>
+      <button class="alt" id="btnPhoto">🖼️ Foto saja</button>
+    </div>
+    <div class="note">Bisa dikirim di wa kalo support :).</div>
+  </div>
+</div>
+
+<script>
+const MIN_SEC = 3;
+
+const $ = (id) => document.getElementById(id);
+const fileEl = $("file"), statusEl = $("status");
+let result = null; // { livePhoto: Blob, photo: Blob, name: string }
+
+function setStatus(msg, cls = "") { statusEl.textContent = msg; statusEl.className = cls; }
+
+// ── XMP Motion Photo (Container + legacy MicroVideo) ─────────────────────────
+function buildXmp(videoLen) {
+  const xml =
+`<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="lp-app">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about=""
+      xmlns:GCamera="http://ns.google.com/photos/1.0/camera/"
+      xmlns:Container="http://ns.google.com/photos/1.0/container/"
+      xmlns:Item="http://ns.google.com/photos/1.0/container/item/"
+      GCamera:MotionPhoto="1"
+      GCamera:MotionPhotoVersion="1"
+      GCamera:MotionPhotoPresentationTimestampUs="0"
+      GCamera:MicroVideo="1"
+      GCamera:MicroVideoVersion="1"
+      GCamera:MicroVideoOffset="${videoLen}"
+      GCamera:MicroVideoPresentationTimestampUs="0">
+      <Container:Directory>
+        <rdf:Seq>
+          <rdf:li rdf:parseType="Resource">
+            <Container:Item Item:Mime="image/jpeg" Item:Semantic="Primary" Item:Length="0" Item:Padding="0"/>
+          </rdf:li>
+          <rdf:li rdf:parseType="Resource">
+            <Container:Item Item:Mime="video/mp4" Item:Semantic="MotionPhoto" Item:Length="${videoLen}" Item:Padding="0"/>
+          </rdf:li>
+        </rdf:Seq>
+      </Container:Directory>
+    </rdf:Description>
+  </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`;
+  const enc = new TextEncoder();
+  const header = enc.encode("http://ns.adobe.com/xap/1.0/\0");
+  const body = enc.encode(xml);
+  const len = 2 + header.length + body.length;
+  if (len > 0xffff) throw new Error("XMP terlalu besar");
+  const out = new Uint8Array(4 + header.length + body.length);
+  out[0] = 0xff; out[1] = 0xe1; out[2] = len >> 8; out[3] = len & 0xff;
+  out.set(header, 4);
+  out.set(body, 4 + header.length);
+  return out;
+}
+
+function makeMotionPhoto(jpg, mp4) {
+  if (jpg[0] !== 0xff || jpg[1] !== 0xd8) throw new Error("Bukan JPEG valid");
+  let pos = 2;
+  while (jpg[pos] === 0xff && jpg[pos + 1] === 0xe0) {   // lewati APP0/JFIF
+    pos += 2 + ((jpg[pos + 2] << 8) | jpg[pos + 3]);
+  }
+  return new Blob([jpg.subarray(0, pos), buildXmp(mp4.length), jpg.subarray(pos), mp4],
+                  { type: "image/jpeg" });
+}
+
+// ── Ambil frame pertama ──────────────────────────────────────────────────────
+function firstFrame(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    v.muted = true; v.playsInline = true; v.preload = "auto"; v.src = url;
+
+    const fail = (m) => { URL.revokeObjectURL(url); reject(new Error(m)); };
+    v.onerror = () => fail("Video tidak bisa dibaca. Coba video MP4 (H.264).");
+
+    v.onloadedmetadata = () => {
+      const dur = v.duration;
+      if (!isFinite(dur)) return fail("Durasi video tidak terbaca.");
+      if (dur < MIN_SEC) return fail(`Durasi video ${dur.toFixed(1)} detik.\nMinimal ${MIN_SEC} detik.`);
+
+      const draw = () => {
+        const c = document.createElement("canvas");
+        c.width = v.videoWidth; c.height = v.videoHeight;
+        c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+        c.toBlob((blob) => {
+          URL.revokeObjectURL(url);
+          blob ? resolve({ blob, dur }) : reject(new Error("Gagal membuat foto."));
+        }, "image/jpeg", 0.95);
+      };
+
+      v.onseeked = () => setTimeout(draw, 60);
+      v.currentTime = 0.001;
+    };
+  });
+}
+
+// ── Proses ───────────────────────────────────────────────────────────────────
+fileEl.addEventListener("change", async () => {
+  const file = fileEl.files[0];
+  if (!file) return;
+  $("resultCard").style.display = "none";
+  result = null;
+  $("pickText").textContent = file.name;
+  setStatus("⏳ Memproses...");
+
+  try {
+    const { blob, dur } = await firstFrame(file);
+    const jpg = new Uint8Array(await blob.arrayBuffer());
+    const mp4 = new Uint8Array(await file.arrayBuffer());
+    const live = makeMotionPhoto(jpg, mp4);
+    const base = file.name.replace(/\.[^.]+$/, "") || "video";
+
+    result = { livePhoto: live, photo: blob, name: base };
+    $("preview").src = URL.createObjectURL(blob);
+    $("preview").style.display = "block";
+    $("resultCard").style.display = "block";
+
+    const warn = /mp4/i.test(file.type) ? "" :
+      "\n⚠️ Video bukan MP4, hasil mungkin tidak bisa diputar sebagai live.";
+    setStatus(`✅ Selesai (${dur.toFixed(1)} detik)${warn}`, "ok");
+  } catch (e) {
+    setStatus("❌ " + e.message, "err");
+  }
+});
+
+function download(blob, filename) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+$("btnSave").onclick  = () => result && download(result.livePhoto, `${result.name}_livephoto.jpg`);
+$("btnPhoto").onclick = () => result && download(result.photo, `${result.name}_photo.jpg`);
+$("btnShare").onclick = async () => {
+  if (!result) return;
+  const f = new File([result.livePhoto], `${result.name}_livephoto.jpg`, { type: "image/jpeg" });
+  if (navigator.canShare && navigator.canShare({ files: [f] })) {
+    try { await navigator.share({ files: [f] }); } catch {}
+  } else {
+    setStatus("Fitur bagikan tidak didukung di sini, pakai tombol Simpan.", "err");
+  }
+};
+
+// expose untuk testing
+window.__lp = { makeMotionPhoto, buildXmp };
+</script>
+</body>
+</html>
