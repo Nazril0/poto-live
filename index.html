@@ -44,6 +44,30 @@
     width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #4b5563;
     background: #111827; color: #f9fafb; font-size: 15px;
   }
+
+  /* ── Slider potong: 1 track, 2 gagang ── */
+  .dual { position: relative; height: 36px; margin-top: 2px; }
+  .dual .track, .dual .fill {
+    position: absolute; top: 50%; height: 6px; margin-top: -3px; border-radius: 3px;
+  }
+  .dual .track { left: 0; right: 0; background: #374151; }
+  .dual .fill  { background: #6366f1; left: 0; width: 100%; }
+  .dual input[type=range] {
+    position: absolute; left: 0; top: 0; width: 100%; height: 36px; margin: 0;
+    background: transparent; pointer-events: none;
+    -webkit-appearance: none; appearance: none;
+  }
+  .dual input[type=range]::-webkit-slider-runnable-track { background: transparent; height: 36px; }
+  .dual input[type=range]::-moz-range-track { background: transparent; height: 36px; }
+  .dual input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; pointer-events: auto;
+    width: 26px; height: 26px; margin-top: 5px; border-radius: 50%;
+    background: #fff; border: 4px solid #6366f1; cursor: grab;
+  }
+  .dual input[type=range]::-moz-range-thumb {
+    pointer-events: auto; width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; border: 4px solid #6366f1; cursor: grab;
+  }
 </style>
 </head>
 <body>
@@ -66,6 +90,15 @@
     <div class="lbl"><span>Resolusi</span></div>
     <select id="res"></select>
     <div class="note" id="resNote"></div>
+
+    <div class="lbl"><span>Potong video</span><span id="durVal">0.0 dtk</span></div>
+    <div class="dual">
+      <div class="track"></div>
+      <div class="fill" id="fill"></div>
+      <input id="durA" type="range" min="0" max="1" step="any" value="0">
+      <input id="durB" type="range" min="0" max="1" step="any" value="1">
+    </div>
+    <div class="lbl" style="margin-top:0"><span id="durFrom">0.0</span><span id="durTo">0.0</span></div>
 
     <button id="btnBuild">⚙️ Buat Live Photo</button>
 
@@ -209,19 +242,35 @@ function target() {
 
 function pickMime() {
   if (typeof MediaRecorder === "undefined") return null;
-  return ["video/mp4;codecs=avc1.640028", "video/mp4;codecs=avc1.42E01E", "video/mp4;codecs=avc1", "video/mp4"]
+  return ["video/mp4;codecs=avc1.640028,mp4a.40.2", "video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4;codecs=avc1.640028", "video/mp4;codecs=avc1.42E01E", "video/mp4;codecs=avc1", "video/mp4"]
     .find((t) => MediaRecorder.isTypeSupported(t)) || null;
 }
 
+// ── Potong durasi (awal & akhir dalam 1 slider) ─────────────────────────────
+function trimStart() { return Number($("durA").value); }
+function trimEnd()   { return Number($("durB").value); }
+function isTrimmed() { return !!src && (trimStart() > 0.05 || trimEnd() < src.dur - 0.05); }
+
 function updateResNote() {
   const note = $("resNote");
-  if (!Number($("res").value)) {
+  const scaled = !!Number($("res").value);
+  if (!scaled && !isTrimmed()) {
     note.textContent = "Video dipakai apa adanya, kualitas video sama persis dengan file aslinya.";
   } else if (pickMime()) {
-    note.textContent = "Video di-encode ulang ke resolusi ini. Prosesnya selama durasi video, hasilnya tanpa suara.";
+    note.textContent = "Resolusi/durasi diubah, jadi video di-encode ulang. Prosesnya selama durasi video. Suara ikut kalau browser mendukung.";
   } else {
-    note.textContent = "Browser ini tidak bisa encode MP4: hanya foto yang diperkecil, video tetap asli.";
+    note.textContent = "Browser ini tidak bisa encode MP4: video tetap asli (resolusi dan durasi penuh), hanya foto yang diperkecil.";
   }
+}
+
+function updateDurLabel() {
+  const a = trimStart(), b = trimEnd();
+  $("durVal").textContent = isTrimmed() ? `${(b - a).toFixed(1)} dtk` : `${src.dur.toFixed(1)} dtk (penuh)`;
+  $("durFrom").textContent = a.toFixed(1) + " dtk";
+  $("durTo").textContent = b.toFixed(1) + " dtk";
+  const fill = $("fill");
+  fill.style.left = (a / src.dur * 100) + "%";
+  fill.style.width = ((b - a) / src.dur * 100) + "%";
 }
 
 function invalidate() { result = null; $("outputs").style.display = "none"; }
@@ -242,8 +291,36 @@ async function updatePreview() {
 $("frame").addEventListener("input", () => { invalidate(); updatePreview(); });
 $("res").addEventListener("change", () => { invalidate(); updateResNote(); });
 
+// Frame foto harus tetap di dalam bagian video yang dipakai
+function syncFrameRange(follow) {
+  const a = trimStart(), b = trimEnd();
+  const f = $("frame");
+  f.min = String(a); f.max = String(b);
+  let t = Number(f.value);
+  if (follow !== undefined) t = follow;           // gagang yang digeser, preview ikut
+  const c = Math.min(b, Math.max(a, t));
+  if (c !== Number(f.value) || follow !== undefined) { f.value = String(c); updatePreview(); }
+}
+
+function onTrim(which) {
+  invalidate();
+  const A = $("durA"), B = $("durB");
+  let a = Number(A.value), b = Number(B.value);
+  if (which === "A" && b - a < MIN_SEC) { a = Math.max(0, b - MIN_SEC); A.value = String(a); }
+  if (which === "B" && b - a < MIN_SEC) { b = Math.min(src.dur, a + MIN_SEC); B.value = String(b); }
+  // kalau sisa video pas 3 dtk dan mentok, dorong gagang satunya
+  if (b - a < MIN_SEC - 1e-6) {
+    if (which === "A") { b = Math.min(src.dur, a + MIN_SEC); B.value = String(b); }
+    else               { a = Math.max(0, b - MIN_SEC);       A.value = String(a); }
+  }
+  updateDurLabel(); updateResNote();
+  syncFrameRange(which === "A" ? a : b);
+}
+$("durA").addEventListener("input", () => onTrim("A"));
+$("durB").addEventListener("input", () => onTrim("B"));
+
 // ── Encode ulang video ke resolusi target (real-time via MediaRecorder) ─────
-async function encodeVideo(mime, w, h, onProgress) {
+async function encodeVideo(mime, w, h, startSec, endSec, onProgress) {
   const v = document.createElement("video");
   v.muted = true; v.playsInline = true; v.src = src.url;
   await new Promise((res, rej) => {
@@ -259,6 +336,19 @@ async function encodeVideo(mime, w, h, onProgress) {
 
   const fps = 30;
   const stream = c.captureStream(fps);
+
+  // Ambil audio dari video (tanpa diputar lewat speaker)
+  let actx = null;
+  try {
+    v.muted = false;
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const node = actx.createMediaElementSource(v);
+    const dest = actx.createMediaStreamDestination();
+    node.connect(dest);
+    dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
+    if (actx.state === "suspended") await actx.resume();
+  } catch (e) { v.muted = true; }
+
   const rec = new MediaRecorder(stream, {
     mimeType: mime,
     videoBitsPerSecond: Math.round(Math.min(20e6, Math.max(3e6, w * h * fps * 0.14)))
@@ -266,17 +356,22 @@ async function encodeVideo(mime, w, h, onProgress) {
   const chunks = [];
   rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
   const stopped = new Promise((res) => { rec.onstop = res; });
-  const ended = new Promise((res) => { v.onended = res; });
+  let endResolve;
+  const ended = new Promise((res) => { endResolve = res; v.onended = res; });
 
+  const span = Math.max(0.1, endSec - startSec);
   let raf;
   const tick = () => {
+    if (v.currentTime >= endSec) { v.pause(); endResolve(); return; }
     ctx.drawImage(v, 0, 0, w, h);
-    onProgress(v.currentTime / v.duration);
+    onProgress(Math.min(1, Math.max(0, (v.currentTime - startSec) / span)));
     raf = requestAnimationFrame(tick);
   };
 
-  v.currentTime = 0;
-  await v.play();
+  await seekTo(v, startSec);
+  ctx.drawImage(v, 0, 0, w, h);
+  try { await v.play(); }
+  catch (e) { v.muted = true; await v.play(); }   // fallback: tanpa suara
   rec.start();
   tick();
   await ended;
@@ -285,6 +380,7 @@ async function encodeVideo(mime, w, h, onProgress) {
   cancelAnimationFrame(raf);
   rec.stop();
   await stopped;
+  if (actx) actx.close();
   return new Uint8Array(await new Blob(chunks, { type: mime }).arrayBuffer());
 }
 
@@ -300,8 +396,13 @@ fileEl.addEventListener("change", async () => {
 
   try {
     src = await loadVideo(file);
+    for (const id of ["durA", "durB"]) { $(id).min = "0"; $(id).max = String(src.dur); }
+    $("durA").value = "0";
+    $("durB").value = String(src.dur);
+    $("frame").min = "0";
     $("frame").max = String(src.dur);
     $("frame").value = "0";
+    updateDurLabel();
     fillRes();
     $("resultCard").style.display = "block";
     await updatePreview();
@@ -320,23 +421,26 @@ $("btnBuild").onclick = async () => {
   try {
     const t = Number($("frame").value);
     const { w, h, scaled } = target();
+    const a = trimStart(), b = trimEnd();
 
     setStatus("⏳ Membuat foto...");
     await seekTo(src.video, t);
     const c = document.createElement("canvas");
     drawFrame(c, src.video, w, h);
     const photo = await new Promise((res, rej) =>
-      c.toBlob((b) => (b ? res(b) : rej(new Error("Gagal membuat foto."))), "image/jpeg", 0.98));
+      c.toBlob((bl) => (bl ? res(bl) : rej(new Error("Gagal membuat foto."))), "image/jpeg", 0.98));
 
     let mp4, note = "";
-    const mime = scaled ? pickMime() : null;
-    if (scaled && mime) {
+    const trimmed = isTrimmed();
+    const needEnc = scaled || trimmed;
+    const mime = needEnc ? pickMime() : null;
+    if (needEnc && mime) {
       const msg = (p) => `⏳ Encode video ${Math.round(p * 100)}%\nJangan pindah tab atau kunci layar.`;
       setStatus(msg(0));
-      mp4 = await encodeVideo(mime, w, h, (p) => setStatus(msg(p)));
+      mp4 = await encodeVideo(mime, even(w), even(h), trimmed ? a : 0, trimmed ? b : src.dur, (p) => setStatus(msg(p)));
     } else {
       mp4 = new Uint8Array(await src.file.arrayBuffer());
-      if (scaled) note = "\n⚠️ Browser tidak bisa encode MP4, video tetap ukuran asli.";
+      if (needEnc) note = "\n⚠️ Browser tidak bisa encode MP4, video tetap asli (resolusi dan durasi penuh).";
     }
 
     const jpg = new Uint8Array(await photo.arrayBuffer());
