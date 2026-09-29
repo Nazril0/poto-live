@@ -108,6 +108,22 @@
   }
   .live-badge svg { width: 16px; height: 16px; }
 
+  /* preview gerak: tahan fotonya */
+  .stage {
+    position: relative; cursor: pointer; border-radius: 3px; overflow: hidden;
+    touch-action: pan-y; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  .stage:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+  .stage video#pv {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; background: var(--ink); opacity: 0; pointer-events: none;
+  }
+  .polaroid.playing .stage video#pv { opacity: 1; }
+  .live-badge svg { stroke: currentColor; }
+  .live-badge svg circle:first-child { fill: currentColor; }
+  .polaroid.playing .live-badge { background: var(--blue); color: var(--white); }
+  .hint { margin: 14px 6px 0; }
+
   /* panel pengaturan: satu lembar, bukan tumpukan kartu */
   .panel {
     margin-top: 30px; background: var(--white);
@@ -295,9 +311,13 @@
         <svg viewBox="0 0 16 16" fill="none" stroke="#14173A" stroke-width="1.6"><circle cx="8" cy="8" r="1.8" fill="#14173A"/><circle cx="8" cy="8" r="4.4"/><circle cx="8" cy="8" r="7" stroke-dasharray="1.6 2.2"/></svg>
         LIVE
       </div>
-      <canvas id="preview"></canvas>
+      <div class="stage" id="stage" tabindex="0" role="button" aria-label="Tahan untuk memutar preview">
+        <canvas id="preview"></canvas>
+        <video id="pv" playsinline muted preload="auto"></video>
+      </div>
       <figcaption><span>Frame foto</span><span><span id="frameVal">0.00</span> dtk</span></figcaption>
     </figure>
+    <div class="note hint">Tahan foto di atas buat lihat gerakannya. Ini cuma preview dari videonya, bukan file Live Photo aslinya ya.</div>
 
     <div class="panel">
       <div class="field">
@@ -337,7 +357,7 @@
         </div>
       </div>
     </div>
-    <div class="foot">Bisa dikirim di WA/TT kalo support :)</div>
+    <div class="foot">Bisa dikirim di WA kalo support :)</div>
   </div>
 </div>
 
@@ -554,6 +574,51 @@ function onTrim(which) {
 $("durA").addEventListener("input", () => onTrim("A"));
 $("durB").addEventListener("input", () => onTrim("B"));
 
+// ── Preview gerak: tahan fotonya buat mutar (cuma preview video, bukan file live photo) ──
+const pv = $("pv"), stage = $("stage"), poly = document.querySelector(".polaroid");
+let holdTok = 0;
+async function holdStart() {
+  if (!src) return;
+  const tok = ++holdTok;
+  if (pv.getAttribute("src") !== src.url) pv.src = src.url;
+  if (pv.readyState < 2) {
+    await Promise.race([
+      new Promise((r) => pv.addEventListener("loadeddata", r, { once: true })),
+      new Promise((r) => setTimeout(r, 3000))
+    ]);
+  }
+  if (tok !== holdTok) return;
+  await seekTo(pv, trimStart());
+  if (tok !== holdTok) return;
+  try { await pv.play(); } catch (e) { return; }
+  if (tok !== holdTok) { pv.pause(); return; }
+  poly.classList.add("playing");
+  const step = () => {
+    if (tok !== holdTok) return;
+    if (pv.currentTime >= trimEnd() || pv.ended) { holdStop(); return; }
+    requestAnimationFrame(step);
+  };
+  step();
+}
+function holdStop() {
+  holdTok++;
+  pv.pause();
+  poly.classList.remove("playing");
+}
+stage.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+  holdStart();
+});
+["pointerup", "pointercancel", "lostpointercapture"].forEach((ev) => stage.addEventListener(ev, holdStop));
+stage.addEventListener("contextmenu", (e) => e.preventDefault());
+stage.addEventListener("keydown", (e) => {
+  if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); holdStart(); }
+});
+stage.addEventListener("keyup", (e) => {
+  if (e.key === " " || e.key === "Enter") holdStop();
+});
+
 // ── Encode ulang video ke resolusi target (real-time via MediaRecorder) ─────
 async function encodeVideo(mime, w, h, startSec, endSec, onProgress) {
   const v = document.createElement("video");
@@ -624,7 +689,7 @@ fileEl.addEventListener("change", async () => {
   const file = fileEl.files[0];
   if (!file) return;
   if (src) URL.revokeObjectURL(src.url);
-  src = null; invalidate();
+  src = null; invalidate(); holdStop(); pv.removeAttribute("src");
   $("resultCard").style.display = "none";
   $("pickText").textContent = file.name;
   setStatus("⏳ Lagi baca video...");
