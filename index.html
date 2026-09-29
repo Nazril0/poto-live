@@ -340,7 +340,8 @@ $("btnBuild").onclick = async () => {
     }
 
     const jpg = new Uint8Array(await photo.arrayBuffer());
-    const live = makeMotionPhoto(jpg, mp4, Math.round(t * 1e6));
+    // timestamp selalu 0: video diputar penuh dari awal, walau frame foto dipilih di detik lain
+    const live = makeMotionPhoto(jpg, mp4, 0);
     const code = String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
     result = {
       livePhoto: live, photo,
